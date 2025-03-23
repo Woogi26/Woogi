@@ -45,36 +45,9 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"데이터 로드 중 오류 발생: {str(e)}")
 elif use_sample_data:
-    # 샘플 데이터 로드 시도
-    try:
-        # 경로 목록
-        sample_data_paths = [
-            'sample_data.csv',  # 현재 폴더
-            os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'sample_data.csv'),
-            os.path.join(os.getcwd(), 'sample_data.csv'),
-            os.path.join(os.getcwd(), 'single_folder_app', 'sample_data.csv')
-        ]
-        
-        # 파일 존재 확인
-        found_file = False
-        for path in [p for p in sample_data_paths if p]:
-            if os.path.exists(path):
-                try:
-                    df = pd.read_csv(path)
-                    st.info(f"샘플 데이터 로드 완료! (경로: {path})")
-                    found_file = True
-                    break
-                except Exception as e:
-                    continue
-        
-        # 파일을 찾지 못했거나 로드 실패 시 내장 샘플 데이터 사용
-        if not found_file or df is None:
-            df = create_sample_data()
-            st.info("내장된 샘플 데이터를 사용합니다.")
-    except Exception as e:
-        # 모든 로드 실패 시 내장 샘플 데이터 사용
-        df = create_sample_data()
-        st.info("내장된 샘플 데이터를 사용합니다.")
+    # 샘플 데이터 사용 (파일 로드 시도하지 않고 바로 내장 샘플 데이터 사용)
+    df = create_sample_data()
+    st.info("내장된 샘플 데이터를 사용합니다.")
 
 # 데이터가 로드된 경우 표시
 if df is not None:
