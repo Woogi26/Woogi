@@ -2,16 +2,51 @@ import streamlit as st
 import pandas as pd
 import os
 import time
+import importlib
+import sys
+
+# 필요한 패키지 확인 및 설치
+def check_install_packages():
+    required_packages = {
+        'numpy': 'numpy',
+        'plotly.express': 'plotly',
+        'altair': 'altair',
+        'openpyxl': 'openpyxl',
+        'xlsxwriter': 'xlsxwriter',
+        'PIL': 'pillow'
+    }
+    
+    missing_packages = []
+    
+    for module_name, package_name in required_packages.items():
+        try:
+            importlib.import_module(module_name)
+        except ImportError:
+            missing_packages.append(package_name)
+    
+    if missing_packages:
+        st.warning(f"일부 필요한 패키지가 설치되어 있지 않습니다: {', '.join(missing_packages)}")
+        st.info("pip install " + " ".join(missing_packages) + " 명령으로 설치할 수 있습니다.")
+        return False
+    return True
+
+# 패키지 확인
+packages_ok = check_install_packages()
 
 # 커스텀 모듈 임포트 - 경로 수정
-from helpers import load_data, calculate_inventory_metrics, generate_abc_analysis, export_to_excel
-from visualization import (
-    plot_inventory_status, 
-    plot_inventory_value, 
-    plot_abc_analysis, 
-    plot_location_distribution, 
-    plot_stock_status_gauge
-)
+try:
+    from helpers import load_data, calculate_inventory_metrics, generate_abc_analysis, export_to_excel
+    from visualization import (
+        plot_inventory_status, 
+        plot_inventory_value, 
+        plot_abc_analysis, 
+        plot_location_distribution, 
+        plot_stock_status_gauge
+    )
+except ImportError as e:
+    st.error(f"모듈 임포트 오류: {str(e)}")
+    st.info("필요한 모듈 파일(helpers.py, visualization.py)이 현재 폴더에 있는지 확인하세요.")
+    st.stop()
 
 # 페이지 설정
 st.set_page_config(
@@ -65,27 +100,49 @@ if theme == "다크":
 # 메인 탭 설정
 tabs = st.tabs(["📊 대시보드", "📈 재고 분석", "📋 데이터 뷰", "📥 보고서"])
 
+# 패키지가 설치되어 있지 않으면 대시보드 표시하지 않음
+if not packages_ok:
+    st.warning("필요한 패키지가 모두 설치될 때까지 대시보드가 제대로 표시되지 않을 수 있습니다.")
+
 # 데이터 로드
 if uploaded_file is not None:
     with st.spinner('데이터 로드 중...'):
-        df = load_data(uploaded_file)
-        if df is not None:
-            st.session_state.data = df
-            st.session_state.metrics = calculate_inventory_metrics(df)
-            st.session_state.abc_analysis = generate_abc_analysis(df)
-            st.sidebar.success("데이터 로드 완료!")
+        try:
+            df = load_data(uploaded_file)
+            if df is not None:
+                st.session_state.data = df
+                st.session_state.metrics = calculate_inventory_metrics(df)
+                st.session_state.abc_analysis = generate_abc_analysis(df)
+                st.sidebar.success("데이터 로드 완료!")
+        except Exception as e:
+            st.error(f"데이터 로드 중 오류 발생: {str(e)}")
 elif use_sample_data:
     # 샘플 데이터 로드 - 경로 수정
     with st.spinner('샘플 데이터 로드 중...'):
-        sample_data_path = 'sample_data.csv'  # 현재 폴더에 있는 샘플 데이터 파일
-        if os.path.exists(sample_data_path):
-            df = pd.read_csv(sample_data_path)
-            st.session_state.data = df
-            st.session_state.metrics = calculate_inventory_metrics(df)
-            st.session_state.abc_analysis = generate_abc_analysis(df)
-            st.sidebar.info("샘플 데이터 로드 완료!")
-        else:
-            st.error("샘플 데이터 파일을 찾을 수 없습니다.")
+        # 여러 가능한 샘플 데이터 경로 시도
+        sample_data_paths = [
+            'sample_data.csv',  # 현재 폴더
+            os.path.join(os.path.dirname(__file__), 'sample_data.csv'),  # 스크립트 위치 기준
+            os.path.join(os.getcwd(), 'sample_data.csv'),  # 현재 작업 디렉토리 기준
+            os.path.join(os.getcwd(), 'single_folder_app', 'sample_data.csv')  # 상위 구조 고려
+        ]
+        
+        sample_loaded = False
+        for path in sample_data_paths:
+            if os.path.exists(path):
+                try:
+                    df = pd.read_csv(path)
+                    st.session_state.data = df
+                    st.session_state.metrics = calculate_inventory_metrics(df)
+                    st.session_state.abc_analysis = generate_abc_analysis(df)
+                    st.sidebar.info(f"샘플 데이터 로드 완료! (경로: {path})")
+                    sample_loaded = True
+                    break
+                except Exception as e:
+                    st.warning(f"샘플 데이터 로드 시도 중 오류 발생 ({path}): {str(e)}")
+        
+        if not sample_loaded:
+            st.error("샘플 데이터 파일을 찾을 수 없습니다. 다음 경로에서 시도했습니다: " + ", ".join(sample_data_paths))
 
 # 데이터가 로드된 경우 대시보드 표시
 if st.session_state.data is not None and st.session_state.metrics is not None:
@@ -240,26 +297,32 @@ if st.session_state.data is not None and st.session_state.metrics is not None:
                 
                 # 보고서 생성
                 if report_dfs:
-                    # Excel 보고서 링크 생성
-                    with pd.ExcelWriter('temp_report.xlsx', engine='xlsxwriter') as writer:
-                        for sheet_name, data in report_dfs:
-                            data.to_excel(writer, sheet_name=sheet_name, index=False)
-                    
-                    with open('temp_report.xlsx', 'rb') as f:
-                        excel_data = f.read()
-                    
-                    # 임시 파일 삭제
-                    os.remove('temp_report.xlsx')
-                    
-                    # 다운로드 링크 제공
-                    st.download_button(
-                        label="Excel 보고서 다운로드",
-                        data=excel_data,
-                        file_name=f"inventory_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                    
-                    st.success("보고서가 생성되었습니다. 다운로드 버튼을 클릭하여 저장하세요.")
+                    try:
+                        # Excel 보고서 링크 생성
+                        with pd.ExcelWriter('temp_report.xlsx', engine='xlsxwriter') as writer:
+                            for sheet_name, data in report_dfs:
+                                data.to_excel(writer, sheet_name=sheet_name, index=False)
+                        
+                        with open('temp_report.xlsx', 'rb') as f:
+                            excel_data = f.read()
+                        
+                        # 임시 파일 삭제
+                        try:
+                            os.remove('temp_report.xlsx')
+                        except:
+                            pass
+                        
+                        # 다운로드 링크 제공
+                        st.download_button(
+                            label="Excel 보고서 다운로드",
+                            data=excel_data,
+                            file_name=f"inventory_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                        
+                        st.success("보고서가 생성되었습니다. 다운로드 버튼을 클릭하여 저장하세요.")
+                    except Exception as e:
+                        st.error(f"보고서 생성 중 오류 발생: {str(e)}")
                 else:
                     st.warning("보고서에 포함할 내용을 선택하세요.")
 else:
@@ -271,6 +334,20 @@ else:
 # 푸터
 st.sidebar.markdown("---")
 st.sidebar.markdown("© 2023 재고 관리 시스템 | 버전 1.0")
+
+# 디버그 정보
+if st.sidebar.checkbox("디버그 정보 표시", False):
+    st.sidebar.subheader("환경 정보")
+    st.sidebar.text(f"Python 버전: {sys.version}")
+    st.sidebar.text(f"Streamlit 버전: {st.__version__}")
+    st.sidebar.text(f"Pandas 버전: {pd.__version__}")
+    
+    st.sidebar.subheader("파일 경로")
+    st.sidebar.text(f"현재 작업 디렉토리: {os.getcwd()}")
+    st.sidebar.text(f"스크립트 위치: {os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else '알 수 없음'}")
+    
+    if 'sample_data_path' in locals():
+        st.sidebar.text(f"샘플 데이터 경로: {sample_data_path}")
 
 # 앱 실행 방법:
 # streamlit run app.py 
